@@ -17,6 +17,9 @@
 (defvar my/notes-fd-ignore-patterns '(".*")
   "Glob patterns excluded from notes file-name searches.")
 
+(defvar my/notes-weekly-template "Weekly/Template.md"
+  "Weekly template path, relative to the notes vault or absolute.")
+
 (defvar my/notes-tree-sort-mode 'alphabetical
   "Current file sorting mode in the notes Treemacs pane.")
 
@@ -182,29 +185,35 @@
   (setq treemacs-sorting #'my/notes-tree-sorter))
 
 (defun my/notes--open-periodic-note
-    (subdirectory filename-format title-format)
+    (subdirectory filename-format title-format &optional template)
   "Open or create a dated note under SUBDIRECTORY."
   (my/notes--require-vault)
   (let* ((directory (expand-file-name subdirectory my/notes-directory))
          (filename (concat (format-time-string filename-format) ".md"))
          (path (expand-file-name filename directory))
-         (new-file (not (file-exists-p path))))
+         (new-file (not (file-exists-p path)))
+         (template-path
+          (and template (expand-file-name template my/notes-directory))))
+    (when (and new-file template-path (not (file-readable-p template-path)))
+      (user-error "Note template is not readable: %s" template-path))
     (make-directory directory t)
     (find-file path)
     (when (and new-file (= (buffer-size) 0))
-      (insert "# " (format-time-string title-format) "\n\n"))))
+      (if template-path
+          (insert-file-contents template-path)
+        (insert "# " (format-time-string title-format) "\n\n")))))
 
 (defun my/notes-open-daily ()
   "Open or create today's daily note."
   (interactive)
   (my/notes--open-periodic-note
-   "daily" "%Y-%m-%d" "%A, %B %d, %Y"))
+   "Daily" "%Y-%m-%d" "%A, %B %d, %Y"))
 
 (defun my/notes-open-weekly ()
   "Open or create the current ISO week note."
   (interactive)
   (my/notes--open-periodic-note
-   "weekly" "%G-W%V" "Week %V, %G"))
+   "Weekly" "%Y-%m W%V" "Week %V, %G" my/notes-weekly-template))
 
 (defun my/markdown-refresh-inline-images ()
   "Refresh inline image overlays in the current Markdown buffer."
