@@ -20,6 +20,12 @@
 (defvar my/notes-weekly-template "Weekly/Template.md"
   "Weekly template path, relative to the notes vault or absolute.")
 
+(defvar my/notes-auto-save-interval 10
+  "Seconds between saves of modified buffers in the notes vault.")
+
+(defvar my/notes--auto-save-timer nil)
+(defvar my/notes--last-selected-buffer nil)
+
 (defvar my/notes-tree-sort-mode 'alphabetical
   "Current file sorting mode in the notes Treemacs pane.")
 
@@ -85,6 +91,52 @@
         (cons 'my-notes-project root)))))
 
 (add-hook 'project-find-functions #'my/notes-project-try)
+
+(defun my/notes-buffer-p (buffer)
+  "Return non-nil when BUFFER visits a file in the notes vault."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (and buffer-file-name
+           (file-in-directory-p
+            (expand-file-name buffer-file-name)
+            my/notes-directory)))))
+
+(defun my/notes-save-buffer-if-needed (buffer)
+  "Save BUFFER when it is a modified note with no external changes."
+  (when (and (my/notes-buffer-p buffer)
+             (buffer-modified-p buffer))
+    (with-current-buffer buffer
+      (if (verify-visited-file-modtime buffer)
+          (condition-case error-data
+              (save-buffer)
+            (error
+             (message "Could not auto-save note %s: %s"
+                      (buffer-name buffer)
+                      (error-message-string error-data))))
+        (message "Skipped auto-saving externally changed note: %s"
+                 (buffer-name buffer))))))
+
+(defun my/notes-auto-save-all ()
+  "Save all modified file buffers belonging to the notes vault."
+  (dolist (buffer (buffer-list))
+    (my/notes-save-buffer-if-needed buffer)))
+
+(defun my/notes-auto-save-on-buffer-switch ()
+  "Save the previous note when the selected buffer changes."
+  (let ((current (window-buffer (selected-window)))
+        (previous my/notes--last-selected-buffer))
+    (unless (eq current previous)
+      (setq my/notes--last-selected-buffer current)
+      (my/notes-save-buffer-if-needed previous))))
+
+(add-hook 'buffer-list-update-hook #'my/notes-auto-save-on-buffer-switch)
+
+(when (timerp my/notes--auto-save-timer)
+  (cancel-timer my/notes--auto-save-timer))
+(setq my/notes--auto-save-timer
+      (run-with-timer my/notes-auto-save-interval
+                      my/notes-auto-save-interval
+                      #'my/notes-auto-save-all))
 
 (defun my/notes-find-file ()
   "Fuzzy-find a file anywhere in the notes vault."
