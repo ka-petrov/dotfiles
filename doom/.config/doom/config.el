@@ -8,10 +8,10 @@
 (defvar my/notes-code-font-family "JetBrains Mono"
   "Monospaced font family used for code in notes.")
 
-(defvar my/notes-text-width 120
+(defvar my/notes-text-width 80
   "Fallback note width in columns and the preferred fill column.")
 
-(defvar my/notes-canvas-width-pixels 1200
+(defvar my/notes-canvas-width-pixels 800
   "Maximum visual width of the centered note canvas in pixels.")
 
 (defvar my/notes-fd-ignore-patterns '(".*")
