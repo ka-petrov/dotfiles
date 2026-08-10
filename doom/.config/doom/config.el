@@ -34,11 +34,17 @@
 
 (setq doom-theme 'doom-one
       doom-font (font-spec :family "JetBrains Mono" :size 15 :weight 'regular)
-      doom-variable-pitch-font (font-spec :family my/notes-font-family :size 15)
+      doom-variable-pitch-font (font-spec :family my/notes-font-family :size 17)
       display-line-numbers-type nil
       select-enable-clipboard t
       select-enable-primary nil
       save-interprogram-paste-before-kill t)
+
+(defun my/reload-fonts-and-note-remaps ()
+  "Reload Doom fonts used by frames and dynamic note remaps."
+  (doom/reload-font))
+
+(add-hook 'doom-after-reload-hook #'my/reload-fonts-and-note-remaps)
 
 (defun my/toggle-light-dark-theme ()
   "Switch smoothly between Doom One's dark and light variants."
@@ -288,23 +294,22 @@
 
   (defun my/markdown-note-setup ()
     "Apply the default visual note-editing behavior."
-    ;; Load Doom's mixed-pitch configuration before narrowing its face list.
-    (require 'mixed-pitch)
+    (when (bound-and-true-p solaire-mode)
+      (solaire-mode -1))
     (setq-local fill-column my/notes-text-width
                 +word-wrap-fill-style 'soft
                 visual-fill-column-width my/notes-text-width
                 visual-fill-column-center-text t
-                visual-fill-column-adjust-for-text-scale nil
-                mixed-pitch-fixed-pitch-faces
-                '(markdown-code-face
-                  markdown-inline-code-face
-                  markdown-pre-face
-                  markdown-language-info-face
-                  markdown-language-keyword-face))
-    (mixed-pitch-mode 1)
-    (face-remap-add-relative 'default :family my/notes-font-family)
-    (dolist (face mixed-pitch-fixed-pitch-faces)
-      (face-remap-add-relative face :family my/notes-code-font-family))
+                visual-fill-column-adjust-for-text-scale nil)
+    ;; Remap complete faces, including height, so prose and code sizes are
+    ;; independent and follow Doom's live font reloads.
+    (variable-pitch-mode 1)
+    (dolist (face '(markdown-code-face
+                    markdown-inline-code-face
+                    markdown-pre-face
+                    markdown-language-info-face
+                    markdown-language-keyword-face))
+      (face-remap-add-relative face 'fixed-pitch))
     (+word-wrap-mode 1)
     (markdown-display-inline-images))
 
