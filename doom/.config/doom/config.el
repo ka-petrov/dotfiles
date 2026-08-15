@@ -304,15 +304,118 @@
 (after! markdown-mode
   (setq markdown-header-scaling t
         markdown-header-scaling-values '(1.80 1.55 1.35 1.20 1.10 1.00)
-        markdown-hide-markup t
         markdown-fontify-code-blocks-natively t
         markdown-enable-math t
         markdown-enable-wiki-links t
         markdown-wiki-link-alias-first nil
         markdown-wiki-link-search-type '(project)
         markdown-max-image-size '(1000 . 800))
+  (setq-default markdown-hide-markup t)
   (markdown-update-header-faces
    markdown-header-scaling markdown-header-scaling-values)
+
+  (defvar my/markdown--source-buffer nil)
+  (defvar my/markdown--source-beg nil)
+  (defvar my/markdown--source-end nil)
+  (defvar my/markdown--source-overlay nil)
+  (defvar my/markdown--source-image-displays nil)
+  (defvar my/markdown--source-tick nil)
+  (defvar my/markdown--inhibit-source-stripping nil)
+
+  (defun my/markdown--restore-source-line ()
+    "Render the Markdown line most recently exposed as source."
+    (when (and (buffer-live-p my/markdown--source-buffer)
+               (markerp my/markdown--source-beg)
+               (marker-position my/markdown--source-beg))
+      (with-current-buffer my/markdown--source-buffer
+        (let ((beg (marker-position my/markdown--source-beg))
+              (end (marker-position my/markdown--source-end)))
+          (when (and font-lock-mode beg end)
+            (let ((my/markdown--inhibit-source-stripping t))
+              (font-lock-flush beg end))))
+        (dolist (entry my/markdown--source-image-displays)
+          (when (overlay-buffer (car entry))
+            (overlay-put (car entry) 'display (cdr entry))))))
+    (when (overlayp my/markdown--source-overlay)
+      (delete-overlay my/markdown--source-overlay))
+    (when (markerp my/markdown--source-beg)
+      (set-marker my/markdown--source-beg nil))
+    (when (markerp my/markdown--source-end)
+      (set-marker my/markdown--source-end nil))
+    (setq my/markdown--source-buffer nil
+          my/markdown--source-beg nil
+          my/markdown--source-end nil
+          my/markdown--source-overlay nil
+          my/markdown--source-image-displays nil
+          my/markdown--source-tick nil))
+
+  (defun my/markdown--expose-source-line (beg end)
+    "Display the Markdown source from BEG to END."
+    (my/markdown--strip-source-properties beg end)
+    (unless (overlayp my/markdown--source-overlay)
+      (setq my/markdown--source-overlay (make-overlay beg end nil nil t))
+      (overlay-put my/markdown--source-overlay 'priority 1001)
+      (overlay-put my/markdown--source-overlay 'face 'default))
+    (move-overlay my/markdown--source-overlay beg end (current-buffer))
+    (dolist (overlay markdown-inline-image-overlays)
+      (when (and (overlay-buffer overlay)
+                 (< (overlay-start overlay) end)
+                 (> (overlay-end overlay) beg)
+                 (not (assq overlay my/markdown--source-image-displays)))
+        (push (cons overlay (overlay-get overlay 'display))
+              my/markdown--source-image-displays)
+        (overlay-put overlay 'display nil))))
+
+  (defun my/markdown--strip-source-properties (beg end)
+    "Remove visual rendering properties between BEG and END."
+    (with-silent-modifications
+      (remove-list-of-text-properties
+       beg end '(face font-lock-face composition display invisible
+                       keymap help-echo mouse-face))
+      ;; Prevent jit-lock from immediately putting the rendering back.
+      (put-text-property beg end 'fontified t)))
+
+  (defun my/markdown--keep-source-line-visible (&rest _)
+    "Keep the active source line plain after jit-lock fontification."
+    (when (and (not my/markdown--inhibit-source-stripping)
+               (eq (current-buffer) my/markdown--source-buffer)
+               (markerp my/markdown--source-beg))
+      (my/markdown--strip-source-properties
+       (marker-position my/markdown--source-beg)
+       (marker-position my/markdown--source-end))))
+
+  (unless (advice-member-p #'my/markdown--keep-source-line-visible
+                           #'jit-lock-fontify-now)
+    (advice-add #'jit-lock-fontify-now :after
+                #'my/markdown--keep-source-line-visible))
+  (unless (advice-member-p #'my/markdown--keep-source-line-visible
+                           #'font-lock-fontify-region)
+    (advice-add #'font-lock-fontify-region :after
+                #'my/markdown--keep-source-line-visible))
+
+  (defun my/markdown-reveal-current-line ()
+    "Render Markdown except for the logical line containing point."
+    (let ((source-p (and (derived-mode-p 'markdown-mode)
+                         markdown-hide-markup)))
+      (unless (and source-p (eq (current-buffer) my/markdown--source-buffer))
+        (my/markdown--restore-source-line))
+      (when source-p
+        (let ((beg (line-beginning-position))
+              (end (min (point-max) (1+ (line-end-position))))
+              (tick (buffer-chars-modified-tick)))
+          (if (and (markerp my/markdown--source-beg)
+                   (= beg (marker-position my/markdown--source-beg))
+                   (= end (marker-position my/markdown--source-end)))
+              (unless (equal tick my/markdown--source-tick)
+                (my/markdown--expose-source-line beg end))
+            (my/markdown--restore-source-line)
+            (setq my/markdown--source-buffer (current-buffer)
+                  my/markdown--source-beg (copy-marker beg)
+                  my/markdown--source-end (copy-marker end t))
+            (my/markdown--expose-source-line beg end))
+          (setq my/markdown--source-tick tick)))))
+
+  (add-hook 'post-command-hook #'my/markdown-reveal-current-line)
 
   (defun my/markdown-note-setup ()
     "Apply the default visual note-editing behavior."
@@ -333,7 +436,8 @@
                     markdown-language-keyword-face))
       (face-remap-add-relative face 'fixed-pitch))
     (+word-wrap-mode 1)
-    (markdown-display-inline-images))
+    (markdown-display-inline-images)
+    (my/markdown-reveal-current-line))
 
   (add-hook 'markdown-mode-hook #'my/markdown-note-setup))
 
