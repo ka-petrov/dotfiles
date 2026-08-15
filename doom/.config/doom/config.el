@@ -279,6 +279,28 @@
   (markdown-remove-inline-images)
   (markdown-display-inline-images))
 
+(evil-define-motion my/evil-next-blank-line (count)
+  "Move to the COUNTth next blank line, like Vim's `}'."
+  :jump t
+  :type exclusive
+  (let ((count (or count 1)))
+    (dotimes (_ count)
+      (forward-line 1)
+      (while (and (not (eobp))
+                  (not (looking-at-p "[[:blank:]]*$")))
+        (forward-line 1)))))
+
+(evil-define-motion my/evil-previous-blank-line (count)
+  "Move to the COUNTth previous blank line, like Vim's `{'."
+  :jump t
+  :type exclusive
+  (let ((count (or count 1)))
+    (dotimes (_ count)
+      (forward-line -1)
+      (while (and (not (bobp))
+                  (not (looking-at-p "[[:blank:]]*$")))
+        (forward-line -1)))))
+
 (after! markdown-mode
   (setq markdown-header-scaling t
         markdown-header-scaling-values '(1.80 1.55 1.35 1.20 1.10 1.00)
@@ -314,6 +336,11 @@
     (markdown-display-inline-images))
 
   (add-hook 'markdown-mode-hook #'my/markdown-note-setup))
+
+(after! evil-markdown
+  (evil-define-key '(normal visual operator motion) evil-markdown-mode-map
+    (kbd "}") #'my/evil-next-blank-line
+    (kbd "{") #'my/evil-previous-blank-line))
 
 (defun my/markdown-update-canvas-width (&optional window)
   "Keep the Markdown canvas at a fixed pixel width in WINDOW."
