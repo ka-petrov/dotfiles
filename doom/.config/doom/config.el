@@ -302,6 +302,36 @@
         (forward-line -1)))))
 
 (after! markdown-mode
+  (custom-theme-set-faces! 'doom-one
+      '(markdown-header-face
+         :foreground "#cccccc"
+         :weight extra-bold)
+      '(markdown-bold-face
+         :foreground "#cccccc"
+         :weight bold)
+      '(markdown-italic-face
+         :foreground "#cccccc"
+         :slant italic)
+      '(markdown-list-face
+         :foreground "#be8234"
+         :weight bold)
+  )
+  (custom-theme-set-faces! 'doom-one-light
+      '(markdown-header-face
+         :foreground "#30343b"
+         :weight extra-bold)
+      '(markdown-bold-face
+         :foreground "#30343b"
+         :weight bold)
+      '(markdown-italic-face
+         :foreground "#30343b"
+         :slant italic)
+      '(markdown-list-face
+         :foreground "#7b5421"
+         :weight bold)
+  )
+  (setq markdown-list-item-bullets
+      '("⦁"))
   (setq markdown-header-scaling t
         markdown-header-scaling-values '(1.80 1.55 1.35 1.20 1.10 1.00)
         markdown-fontify-code-blocks-natively t
