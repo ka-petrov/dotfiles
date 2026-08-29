@@ -2,11 +2,23 @@
 
 (require 'project)
 
-(defvar my/notes-font-family "Inter"
+(defvar my/fixed-pitch-font-family "Monospace"
+  "Monospaced font family used by Doom.")
+
+(defvar my/fixed-pitch-font-size 15
+  "Default monospaced font size.")
+
+(defvar my/notes-font-family "Sans Serif"
   "Proportional font family used for note prose.")
 
-(defvar my/notes-code-font-family "JetBrains Mono"
+(defvar my/notes-font-size 17
+  "Proportional font size used for note prose.")
+
+(defvar my/notes-code-font-family nil
   "Monospaced font family used for code in notes.")
+
+(defvar my/notes-directory (expand-file-name "~/Notes")
+  "Absolute path to the private Markdown notes vault.")
 
 (defvar my/notes-text-width 80
   "Fallback note width in columns and the preferred fill column.")
@@ -32,9 +44,19 @@
 (defvar my/notes-tree--birth-time-cache (make-hash-table :test #'equal)
   "Cached filesystem birth timestamps used by the notes tree sorter.")
 
+(let ((local-config (expand-file-name "local.el" doom-user-dir)))
+  (when (file-readable-p local-config)
+    (load local-config nil 'nomessage)))
+
+(unless my/notes-code-font-family
+  (setq my/notes-code-font-family my/fixed-pitch-font-family))
+
 (setq doom-theme 'doom-one
-      doom-font (font-spec :family "JetBrains Mono" :size 15 :weight 'regular)
-      doom-variable-pitch-font (font-spec :family my/notes-font-family :size 17)
+      doom-font (font-spec :family my/fixed-pitch-font-family
+                           :size my/fixed-pitch-font-size
+                           :weight 'regular)
+      doom-variable-pitch-font (font-spec :family my/notes-font-family
+                                          :size my/notes-font-size)
       display-line-numbers-type nil
       select-enable-clipboard t
       select-enable-primary nil
@@ -55,20 +77,6 @@
   (load-theme doom-theme t)
   (message "Theme: %s" doom-theme))
 
-;; The vault path is deliberately machine-local and excluded from dotfiles.
-(defvar my/notes-directory nil
-  "Absolute path to the private Markdown notes vault.")
-
-(let ((local-config
-       (expand-file-name
-        "notes-emacs/local.el"
-        (or (getenv "XDG_CONFIG_HOME") "~/.config"))))
-  (when (file-readable-p local-config)
-    (load local-config nil 'nomessage)))
-
-(unless my/notes-directory
-  (setq my/notes-directory (expand-file-name "~/Notes")))
-
 (setq my/notes-directory
       (file-name-as-directory (expand-file-name my/notes-directory)))
 
@@ -80,7 +88,7 @@
   "Signal a useful error unless the configured vault exists."
   (unless (file-directory-p my/notes-directory)
     (user-error
-     "Notes vault does not exist: %s; configure ~/.config/notes-emacs/local.el"
+     "Notes vault does not exist: %s; configure ~/.config/doom/local.el"
      my/notes-directory)))
 
 ;; Teach project.el that the private, non-Git vault is a project.
