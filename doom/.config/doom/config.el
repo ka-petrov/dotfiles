@@ -78,7 +78,7 @@
   '("avif" "bmp" "gif" "jpeg" "jpg" "png" "svg" "tif" "tiff" "webp")
   "Image extensions supported by Obsidian-style embeds.")
 
-(defvar my/notes-tree-sort-mode 'alphabetical
+(defvar my/notes-tree-sort-mode 'updated
   "Current file sorting mode in the notes Treemacs pane.")
 
 (defvar my/notes-tree--birth-time-cache (make-hash-table :test #'equal)
