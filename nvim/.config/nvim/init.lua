@@ -295,7 +295,7 @@ require('lazy').setup {
     cmd = 'Neotree',
     keys = {
       { '<leader>e', '<cmd>Neotree toggle<cr>', desc = 'Explorer (Neo-tree) toggle' },
-      { '<leader>o', '<cmd>Neotree focus<cr>', desc = 'Explorer (Neo-tree) focus' },
+      -- { '<leader>o', '<cmd>Neotree focus<cr>', desc = 'Explorer (Neo-tree) focus' },
     },
     init = function()
       -- If you open nvim with a directory: `nvim .` -> open neo-tree automatically
