@@ -285,6 +285,23 @@
                          my/notes-fd-ignore-patterns))))
     (+vertico/consult-fd-or-find my/notes-directory)))
 
+(defun my/notes-new (name)
+  "Create a Markdown note named NAME in the vault root."
+  (interactive (list (read-string "New note name: ")))
+  (my/notes--require-vault)
+  (setq name (string-trim name))
+  (when (or (string-empty-p name)
+            (member name '("." ".."))
+            (string-match-p "/" name))
+    (user-error "Enter a non-empty note name without a directory"))
+  (let* ((filename (if (string-suffix-p ".md" name) name (concat name ".md")))
+         (path (expand-file-name filename my/notes-directory)))
+    (when (file-exists-p path)
+      (user-error "Note already exists: %s" filename))
+    (find-file path)
+    (when (= (buffer-size) 0)
+      (insert "# " (file-name-sans-extension filename) "\n\n"))))
+
 (defun my/notes-search ()
   "Live full-text search across the notes vault with ripgrep."
   (interactive)
@@ -372,11 +389,11 @@
   (setq treemacs-sorting #'my/notes-tree-sorter))
 
 (defun my/notes--open-periodic-note
-    (subdirectory filename-format title-format &optional template)
+    (subdirectory filename-format title-format &optional template time)
   "Open or create a dated note under SUBDIRECTORY."
   (my/notes--require-vault)
   (let* ((directory (expand-file-name subdirectory my/notes-directory))
-         (filename (concat (format-time-string filename-format) ".md"))
+          (filename (concat (format-time-string filename-format time) ".md"))
          (path (expand-file-name filename directory))
          (new-file (not (file-exists-p path)))
          (template-path
@@ -388,7 +405,7 @@
     (when (and new-file (= (buffer-size) 0))
       (if template-path
           (insert-file-contents template-path)
-        (insert "# " (format-time-string title-format) "\n\n")))))
+        (insert "# " (format-time-string title-format time) "\n\n")))))
 
 (defun my/notes-open-daily ()
   "Open or create today's daily note."
@@ -401,6 +418,73 @@
   (interactive)
   (my/notes--open-periodic-note
    "Weekly" "%Y-%m W%V" "Week %V, %G" my/notes-weekly-template))
+
+(defun my/notes--shift-date (time days)
+  "Shift TIME by calendar DAYS, preserving dates across DST changes."
+  (let ((date (decode-time time)))
+    (encode-time 0 0 12 (+ (nth 3 date) days) (nth 4 date) (nth 5 date))))
+
+(defun my/notes--open-adjacent-periodic (direction)
+  "Open the periodic note DIRECTION periods from the current note."
+  (my/notes--require-vault)
+  (let ((relative (and buffer-file-name
+                       (file-relative-name buffer-file-name my/notes-directory))))
+    (cond
+     ((and relative
+           (string-match
+            "\\`Daily/\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)\\.md\\'"
+            relative))
+      (let ((time (encode-time 0 0 12
+                               (string-to-number (match-string 3 relative))
+                               (string-to-number (match-string 2 relative))
+                               (string-to-number (match-string 1 relative)))))
+        (unless (equal relative (format-time-string "Daily/%Y-%m-%d.md" time))
+          (user-error "Invalid daily note date"))
+        (my/notes--open-periodic-note
+         "Daily" "%Y-%m-%d" "%A, %B %d, %Y" nil
+         (my/notes--shift-date time direction))))
+     ((and relative
+           (string-match
+            "\\`Weekly/\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\) W[0-9]\\{2\\}\\.md\\'"
+            relative))
+      (let* ((year (string-to-number (match-string 1 relative)))
+             (month (string-to-number (match-string 2 relative)))
+             ;; The filename uses calendar year/month plus ISO week. Find a
+             ;; matching day before normalizing to the week's Monday.
+             (time (cl-loop for day from 1 to 31
+                            for date = (encode-time 0 0 12 day month year)
+                            when (equal relative
+                                        (format-time-string "Weekly/%Y-%m W%V.md" date))
+                            return date)))
+        (unless time
+          (user-error "Invalid weekly note date"))
+        (let* ((monday (my/notes--shift-date
+                        time (- (* direction 7)
+                                (mod (1- (nth 6 (decode-time time))) 7))))
+               ;; A week spanning months can have either month in its filename.
+               (existing (cl-loop for day from 0 to 6
+                                  for date = (my/notes--shift-date monday day)
+                                  for path = (expand-file-name
+                                              (format-time-string
+                                               "Weekly/%Y-%m W%V.md" date)
+                                              my/notes-directory)
+                                  when (file-exists-p path) return path)))
+          (if existing
+              (find-file existing)
+            (my/notes--open-periodic-note
+             "Weekly" "%Y-%m W%V" "Week %V, %G"
+             my/notes-weekly-template monday)))))
+     (t (user-error "Open a daily or weekly note first")))))
+
+(defun my/notes-open-previous-periodic ()
+  "Open or create the previous daily or weekly note."
+  (interactive)
+  (my/notes--open-adjacent-periodic -1))
+
+(defun my/notes-open-next-periodic ()
+  "Open or create the next daily or weekly note."
+  (interactive)
+  (my/notes--open-adjacent-periodic 1))
 
 (defun my/markdown-refresh-inline-images ()
   "Refresh inline image overlays in the current Markdown buffer."
@@ -750,6 +834,19 @@
 
 (map! :g "C-c d" #'my/notes-open-daily
       :g "C-c t" #'my/toggle-light-dark-theme)
+
+;; Override mode bindings, including Evil's movement and scrolling commands.
+(map! :map 'override
+      :desc "Find note file"   "C-p" #'my/notes-find-file
+      :desc "This week's note" "C-d" #'my/notes-open-weekly
+      :desc "New root note"    "C-n" #'my/notes-new
+      :desc "Previous periodic note" "C-," #'my/notes-open-previous-periodic
+      :desc "Next periodic note"     "C-." #'my/notes-open-next-periodic
+      :nvimreo "C-p" #'my/notes-find-file
+      :nvimreo "C-d" #'my/notes-open-weekly
+      :nvimreo "C-n" #'my/notes-new
+      :nvimreo "C-," #'my/notes-open-previous-periodic
+      :nvimreo "C-." #'my/notes-open-next-periodic)
 
 ;; Example custom periodic note type (not enabled):
 ;; (defun my/notes-open-monthly ()
