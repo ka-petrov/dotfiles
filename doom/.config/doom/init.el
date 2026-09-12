@@ -2,6 +2,7 @@
 
 (doom!
  :completion
+ (corfu +orderless)
  vertico
 
  :ui

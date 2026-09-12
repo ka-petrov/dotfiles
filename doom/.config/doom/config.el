@@ -2,6 +2,33 @@
 
 (require 'project)
 
+;; Keep Evil commands on their QWERTY keys with the OS Russian layout active.
+;; Translate key events so mode-specific bindings and leader prefixes also work.
+(defvar my/evil-reading-character nil
+  "Non-nil while Evil reads a literal character, e.g. for `f' or `r'.")
+
+(defun my/evil-read-character-a (original &rest args)
+  "Read literal characters through ORIGINAL without layout translation."
+  (let ((my/evil-reading-character t))
+    (apply original args)))
+
+(after! evil
+  (unless (advice-member-p #'my/evil-read-character-a #'evil-read-key)
+    (advice-add #'evil-read-key :around #'my/evil-read-character-a))
+  (let ((russian "ёйцукенгшщзхъфывапролджэячсмитьбюЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ")
+        (english "`qwertyuiop[]asdfghjkl;'zxcvbnm,.~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>"))
+    (dotimes (i (length russian))
+      (let ((from (vector (aref russian i)))
+            (to (vector (aref english i))))
+        (define-key key-translation-map from
+          (lambda (_prompt)
+            (if (and (bound-and-true-p evil-local-mode)
+                     (memq evil-state '(normal motion visual operator))
+                     (not (minibufferp))
+                     (not my/evil-reading-character))
+                to
+              from)))))))
+
 (defvar my/fixed-pitch-font-family "Monospace"
   "Monospaced font family used by Doom.")
 
@@ -37,6 +64,19 @@
 
 (defvar my/notes--auto-save-timer nil)
 (defvar my/notes--last-selected-buffer nil)
+
+(defvar my/notes--file-index nil
+  "Vault filenames mapped to their absolute paths.")
+
+(defvar my/notes--note-completions nil
+  "Cached note basenames offered inside wiki links.")
+
+(defvar my/notes--image-completions nil
+  "Cached image basenames offered inside wiki embeds.")
+
+(defvar my/notes-image-extensions
+  '("avif" "bmp" "gif" "jpeg" "jpg" "png" "svg" "tif" "tiff" "webp")
+  "Image extensions supported by Obsidian-style embeds.")
 
 (defvar my/notes-tree-sort-mode 'alphabetical
   "Current file sorting mode in the notes Treemacs pane.")
@@ -90,6 +130,87 @@
     (user-error
      "Notes vault does not exist: %s; configure ~/.config/doom/local.el"
      my/notes-directory)))
+
+(defun my/notes-refresh-file-index ()
+  "Rebuild the filename index used by wiki links and completion."
+  (interactive)
+  (my/notes--require-vault)
+  (let ((index (make-hash-table :test #'equal))
+        notes images)
+    (cl-labels
+        ((scan (directory)
+           (dolist (path (directory-files
+                          directory t directory-files-no-dot-files-regexp))
+             (cond
+              ((and (file-directory-p path)
+                    (not (file-symlink-p path))
+                    (not (string-prefix-p "." (file-name-nondirectory path))))
+               (scan path))
+              ((file-regular-p path)
+               (let* ((name (file-name-nondirectory path))
+                      (extension (downcase (or (file-name-extension name) ""))))
+                 (when (or (string-equal extension "md")
+                           (member extension my/notes-image-extensions))
+                   (push path (gethash name index))
+                   (if (string-equal extension "md")
+                       (push (file-name-sans-extension name) notes)
+                     (push name images)))))))))
+      (scan my/notes-directory))
+    (maphash (lambda (name paths)
+               (puthash name (sort paths #'string-lessp) index))
+             index)
+    (setq my/notes--file-index index
+          my/notes--note-completions
+          (sort (delete-dups notes) #'string-lessp)
+          my/notes--image-completions
+          (sort (delete-dups images) #'string-lessp)))
+  (when (called-interactively-p 'interactive)
+    (message "Indexed %d vault filenames"
+             (hash-table-count my/notes--file-index))))
+
+(defun my/notes--ensure-file-index ()
+  "Build the vault filename index if necessary."
+  (unless (hash-table-p my/notes--file-index)
+    (my/notes-refresh-file-index)))
+
+(defun my/notes--image-filename-p (filename)
+  "Return non-nil when FILENAME has a supported image extension."
+  (member (downcase (or (file-name-extension filename) ""))
+          my/notes-image-extensions))
+
+(defun my/notes--wiki-target-filename (target)
+  "Return the on-disk filename represented by wiki TARGET."
+  (if (or (string-equal (downcase (or (file-name-extension target) "")) "md")
+          (my/notes--image-filename-p target))
+      target
+    (concat target ".md")))
+
+(defun my/notes-resolve-wiki-target (target)
+  "Resolve wiki TARGET by filename anywhere in the notes vault."
+  (my/notes--ensure-file-index)
+  (let* ((filename (my/notes--wiki-target-filename target))
+         (local-path (expand-file-name filename default-directory))
+         (root-path (expand-file-name filename my/notes-directory))
+         (matches (gethash (file-name-nondirectory filename)
+                           my/notes--file-index)))
+    (cond
+     ((file-exists-p local-path) local-path)
+     ((and (string-match-p "/" filename) (file-exists-p root-path)) root-path)
+     (matches (car matches))
+     ((string-match-p "/" filename) root-path)
+     (t filename))))
+
+(defun my/notes--refresh-index-for-new-file ()
+  "Refresh the vault index after saving a previously unknown file."
+  (when (and buffer-file-name
+             (my/notes-buffer-p (current-buffer))
+             (hash-table-p my/notes--file-index)
+             (not (member (expand-file-name buffer-file-name)
+                          (gethash (file-name-nondirectory buffer-file-name)
+                                   my/notes--file-index))))
+    (my/notes-refresh-file-index)))
+
+(add-hook 'after-save-hook #'my/notes--refresh-index-for-new-file)
 
 ;; Teach project.el that the private, non-Git vault is a project.
 (cl-defmethod project-root ((project (head my-notes-project)))
@@ -347,10 +468,119 @@
         markdown-enable-wiki-links t
         markdown-wiki-link-alias-first nil
         markdown-wiki-link-search-type '(project)
+        markdown-link-space-sub-char " "
         markdown-max-image-size '(1000 . 800))
   (setq-default markdown-hide-markup t)
   (markdown-update-header-faces
    markdown-header-scaling markdown-header-scaling-values)
+
+  (defun my/markdown--resolve-wiki-link-a (original target)
+    "Resolve note wiki TARGET by vault-wide basename lookup."
+    (if (my/notes-buffer-p (current-buffer))
+        (save-match-data
+          (my/notes-resolve-wiki-target target))
+      (funcall original target)))
+
+  (unless (advice-member-p #'my/markdown--resolve-wiki-link-a
+                           #'markdown-convert-wiki-link-to-filename)
+    (advice-add #'markdown-convert-wiki-link-to-filename :around
+                #'my/markdown--resolve-wiki-link-a))
+
+  (defun my/markdown-follow-thing-at-point ()
+    "Open the Markdown or wiki link at point in its appropriate mode."
+    (interactive)
+    (let ((case-fold-search nil))
+      (if (and markdown-enable-wiki-links
+               (thing-at-point-looking-at markdown-regex-wiki-link)
+               (not (markdown-code-block-at-point-p)))
+          (let ((target (markdown-wiki-link-link)))
+            (find-file (markdown-convert-wiki-link-to-filename target)))
+        (markdown-follow-thing-at-point nil))))
+
+  (map! :map markdown-mode-map
+        :nvi "C-<return>" #'my/markdown-follow-thing-at-point)
+
+  (defun my/markdown--create-image (path)
+    "Create a display image for PATH using Markdown's size limit."
+    (cond ((and markdown-max-image-size
+                (image-type-available-p 'imagemagick))
+           (create-image path 'imagemagick nil
+                         :max-width (car markdown-max-image-size)
+                         :max-height (cdr markdown-max-image-size)))
+          (markdown-max-image-size
+           (create-image path nil nil
+                         :max-width (car markdown-max-image-size)
+                         :max-height (cdr markdown-max-image-size)))
+          (t (create-image path))))
+
+  (defun my/markdown-display-obsidian-images (&rest _)
+    "Display vault images referenced as ![[filename.ext]]."
+    (when (my/notes-buffer-p (current-buffer))
+      (save-excursion
+        (save-restriction
+          (widen)
+          (goto-char (point-min))
+          (while (re-search-forward
+                  "!\\[\\[\\([^]|\n]+\\)\\(?:|[^]\n]*\\)?\\]\\]" nil t)
+            (let ((start (match-beginning 0))
+                  (end (match-end 0))
+                  (target (match-string-no-properties 1)))
+              (when (and (my/notes--image-filename-p target)
+                         (not (markdown-code-block-at-point-p start))
+                         (not (markdown-inline-code-at-point-p start)))
+                (let ((path (my/notes-resolve-wiki-target target)))
+                  (when (file-exists-p path)
+                    (when-let ((image (my/markdown--create-image path)))
+                      (let ((overlay (make-overlay start end)))
+                        (overlay-put overlay 'display image)
+                        (overlay-put overlay 'face 'default)
+                        (push overlay markdown-inline-image-overlays))))))))))))
+
+  (unless (advice-member-p #'my/markdown-display-obsidian-images
+                           #'markdown-display-inline-images)
+    (advice-add #'markdown-display-inline-images :after
+                #'my/markdown-display-obsidian-images))
+
+  (defun my/markdown--wiki-completion-annotation (candidate image-p)
+    "Return vault path annotations for wiki completion CANDIDATE."
+    (my/notes--ensure-file-index)
+    (let* ((filename (if image-p
+                         candidate
+                       (concat candidate ".md")))
+           (paths (gethash filename my/notes--file-index)))
+      (when paths
+        (concat
+         "  "
+         (mapconcat
+          (lambda (path)
+            (or (file-name-directory
+                 (file-relative-name path my/notes-directory))
+                "./"))
+          paths ", ")))))
+
+  (defun my/markdown-wiki-completion-at-point ()
+    "Complete vault-wide basenames inside [[...]] and ![[...]]."
+    (when (my/notes-buffer-p (current-buffer))
+      (let* ((end (point))
+             (line-start (line-beginning-position))
+             (open (save-excursion (search-backward "[[" line-start t)))
+             (image-p (and open (eq (char-before open) ?!))))
+        (when (and open
+                   (not (markdown-code-block-at-point-p open))
+                   (not (markdown-inline-code-at-point-p open))
+                   (not (string-match-p
+                         "\\(?:]]\\||\\)"
+                         (buffer-substring-no-properties (+ open 2) end))))
+          (my/notes--ensure-file-index)
+          (list (+ open 2) end
+                (if image-p
+                    my/notes--image-completions
+                  my/notes--note-completions)
+                :exclusive 'no
+                :annotation-function
+                (lambda (candidate)
+                  (my/markdown--wiki-completion-annotation
+                   candidate image-p)))))))
 
   (defvar my/markdown--source-buffer nil)
   (defvar my/markdown--source-beg nil)
@@ -474,6 +704,8 @@
                     markdown-language-keyword-face))
       (face-remap-add-relative face 'fixed-pitch))
     (+word-wrap-mode 1)
+    (add-hook 'completion-at-point-functions
+              #'my/markdown-wiki-completion-at-point nil t)
     (markdown-display-inline-images)
     (my/markdown-reveal-current-line))
 
