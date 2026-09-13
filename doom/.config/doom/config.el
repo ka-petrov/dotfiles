@@ -837,14 +837,14 @@
 
 ;; Override mode bindings, including Evil's movement and scrolling commands.
 (map! :map 'override
-      :desc "Find note file"   "C-p" #'my/notes-find-file
+      :desc "Find note file"   "C-S-p" #'my/notes-find-file
       :desc "This week's note" "C-d" #'my/notes-open-weekly
-      :desc "New root note"    "C-n" #'my/notes-new
+      :desc "New root note"    "C-S-n" #'my/notes-new
       :desc "Previous periodic note" "C-," #'my/notes-open-previous-periodic
       :desc "Next periodic note"     "C-." #'my/notes-open-next-periodic
-      :nvimreo "C-p" #'my/notes-find-file
+      :nvimreo "C-S-p" #'my/notes-find-file
       :nvimreo "C-d" #'my/notes-open-weekly
-      :nvimreo "C-n" #'my/notes-new
+      :nvimreo "C-S-n" #'my/notes-new
       :nvimreo "C-," #'my/notes-open-previous-periodic
       :nvimreo "C-." #'my/notes-open-next-periodic)
 
