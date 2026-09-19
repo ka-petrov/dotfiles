@@ -2,4 +2,7 @@
 ;;; packages.el
 
 ;; Doom modules provide Evil, Vertico/Consult, Treemacs, themes, mixed-pitch,
-;; visual-fill-column, and markdown-mode, so no extra packages are needed.
+;; visual-fill-column, and markdown-mode.
+
+;; Pixel-based Markdown table alignment without changing source spacing.
+(package! valign)

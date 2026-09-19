@@ -514,6 +514,55 @@
                   (not (looking-at-p "[[:blank:]]*$")))
         (forward-line -1)))))
 
+(use-package! valign
+  :commands (valign-mode valign-table)
+  :config
+  ;; Fancy bars change width when entered by the cursor, which makes
+  ;; measured column positions unstable.  Keep ordinary pipe glyphs.
+  (setq valign-fancy-bar nil)
+
+  ;; Valign 3.1.1 expects separator markers immediately after the pipe,
+  ;; but Markdown permits padding, e.g. "| --- | ---: |".  Without this
+  ;; compatibility shim it creates bars but no column-alignment overlays.
+  (defun my/valign--markdown-separator-p-a (original &optional pos)
+    "Recognize padded Markdown separator cells at POS."
+    (if (not (derived-mode-p 'markdown-mode))
+        (funcall original pos)
+      (save-excursion
+        (when pos (goto-char pos))
+        (save-match-data
+          (looking-at-p "[ \t]*:?-+:?[ \t]*|")))))
+
+  (defun my/valign--markdown-alignment-a (original)
+    "Read Markdown alignment markers after optional cell padding."
+    (if (not (derived-mode-p 'markdown-mode))
+        (funcall original)
+      (save-excursion
+        (skip-chars-forward " \t" (line-end-position))
+        (funcall original))))
+
+  (defun my/valign--markdown-right-padding-a
+      (col-width alignment _cell-width _cell-beg _content-beg
+       content-end cell-end column-start space-width)
+    "Align trailing padding in right-aligned Markdown cells too."
+    ;; Valign stretches leading padding for right alignment, but leaves
+    ;; trailing source spaces at their natural width.  Unequal padding
+    ;; otherwise shifts the closing pipe even when the text is aligned.
+    (when (and (derived-mode-p 'markdown-mode)
+               (eq alignment 'right)
+               (< content-end cell-end))
+      (valign--put-overlay content-end cell-end
+                           'display (valign--space
+                                     (+ column-start col-width space-width)))))
+
+  (advice-add 'valign--separator-p :around
+              #'my/valign--markdown-separator-p-a)
+  ;; The misspelling is part of valign's function name.
+  (advice-add 'valign--alignment-from-seperator :around
+              #'my/valign--markdown-alignment-a)
+  (advice-add 'valign--cell :after
+              #'my/valign--markdown-right-padding-a))
+
 (after! markdown-mode
   (custom-theme-set-faces! 'doom-one
       '(markdown-header-face
@@ -746,9 +795,13 @@
                 #'my/markdown--keep-source-line-visible))
 
   (defun my/markdown-reveal-current-line ()
-    "Render Markdown except for the logical line containing point."
+    "Reveal the current Markdown line, keeping visually aligned tables rendered."
     (let ((source-p (and (derived-mode-p 'markdown-mode)
-                         markdown-hide-markup)))
+                         markdown-hide-markup
+                         ;; Changing one row's font or exposing its markup
+                         ;; invalidates valign's measured column widths.
+                         (not (and (bound-and-true-p valign-mode)
+                                   (markdown-table-at-point-p))))))
       (unless (and source-p (eq (current-buffer) my/markdown--source-buffer))
         (my/markdown--restore-source-line))
       (when source-p
@@ -769,6 +822,28 @@
 
   (add-hook 'post-command-hook #'my/markdown-reveal-current-line)
 
+  (defvar-local my/markdown--table-face-remap nil
+    "Face remap cookie for the current table display style.")
+
+  (defun my/markdown-sync-table-rendering (&rest _)
+    "Render tables only when Markdown markup hiding is enabled."
+    (when (derived-mode-p 'markdown-mode)
+      (let ((render-p (and markdown-hide-markup (display-graphic-p))))
+        (when my/markdown--table-face-remap
+          (face-remap-remove-relative my/markdown--table-face-remap))
+        (setq my/markdown--table-face-remap
+              (face-remap-add-relative 'markdown-table-face
+                                       (if render-p 'variable-pitch 'fixed-pitch)))
+        (if render-p
+            (unless (bound-and-true-p valign-mode)
+              (valign-mode 1))
+          (when (bound-and-true-p valign-mode)
+            (valign-mode -1)))
+        (my/markdown-reveal-current-line))))
+
+  (advice-add 'markdown-toggle-markup-hiding :after
+              #'my/markdown-sync-table-rendering)
+
   (defun my/markdown-note-setup ()
     "Apply the default visual note-editing behavior."
     (when (bound-and-true-p solaire-mode)
@@ -787,6 +862,8 @@
                     markdown-language-info-face
                     markdown-language-keyword-face))
       (face-remap-add-relative face 'fixed-pitch))
+    ;; Set up fonts before enabling pixel-based table measurement.
+    (my/markdown-sync-table-rendering)
     (+word-wrap-mode 1)
     (add-hook 'completion-at-point-functions
               #'my/markdown-wiki-completion-at-point nil t)
