@@ -562,6 +562,24 @@ require('lazy').setup {
     end,
   },
 
+  -- Markdown Preview
+  {
+    'MeanderingProgrammer/render-markdown.nvim',
+    ft = { 'markdown' },
+    dependencies = {
+      'nvim-treesitter/nvim-treesitter',
+      'nvim-tree/nvim-web-devicons',
+    },
+    opts = {},
+    keys = {
+      {
+        '<leader>mr',
+        '<cmd>RenderMarkdown toggle<cr>',
+        desc = 'Toggle Markdown rendering',
+      },
+    },
+  },
+
   -- LSP plugins
   {
     'folke/lazydev.nvim',
